@@ -1,8 +1,6 @@
 name: branch build & push
 
 on:
-  #schedule:
-  #  - cron: '50 15 * * *'  #Change this to when you want automatic builds
   push:
     paths-ignore:
     - 'README.md'
@@ -17,48 +15,69 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
       id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-        
+        uses: docker/setup-qemu-action@v3
+
       - name: Setup Docker buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Cache Docker layers
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-
 
+      # ------------------------------------------
+      # Login to Docker Hub
+      # ------------------------------------------
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
+          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-        
+
+      # ------------------------------------------
+      # Login to GitHub Container Registry (GHCR)
+      # ------------------------------------------
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ------------------------------------------------------
+      # Build for MAIN → latest (Docker Hub + GHCR)
+      # ------------------------------------------------------
       - name: Production Build and push
         if: ${{ github.ref == 'refs/heads/main' }}
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:latest
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
+      # ------------------------------------------------------
+      # Build for TAGS → versioned tags (Docker Hub + GHCR)
+      # ------------------------------------------------------
       - name: Production Get Tag Name
         if: startsWith(github.ref, 'refs/tags/v')
         uses: little-core-labs/get-git-tag@v3.0.1
@@ -66,26 +85,36 @@ jobs:
 
       - name: Production Tag Build and push
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:${{ steps.tagName.outputs.tag }}
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new          
-
-      - name: Development Build and push
-        if: ${{ github.ref == 'refs/heads/develop' }}
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:develop
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:${{ steps.tagName.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:${{ steps.tagName.outputs.tag }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
 
+      # ------------------------------------------------------
+      # Build for DEVELOP → develop tag (Docker Hub + GHCR)
+      # ------------------------------------------------------
+      - name: Development Build and push
+        if: ${{ github.ref == 'refs/heads/develop' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:develop
+            ghcr.io/${{ github.repository_owner }}/${{ secrets.DOCKERHUB_IMAGE_NAME }}:develop
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+
+      # ------------------------------------------
+      # Move build cache
+      # ------------------------------------------
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
