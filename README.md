@@ -38,6 +38,8 @@ Still in development... You might need to wait a bit if you have a large amount 
   - stable - xavierh/goaccess-for-nginxproxymanager:latest
   - latest stable development - xavierh/goaccess-for-nginxproxymanager:develop
 
+## **GHCR Images**
+- Look under packages on github for the latest
 
 ## **Github Repo**   
 - https://github.com/xavier-hernandez/goaccess-for-nginxproxymanager
